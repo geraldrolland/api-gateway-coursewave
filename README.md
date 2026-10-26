@@ -346,6 +346,7 @@ For each configured route, the gateway:
 - Forwards to the configured upstream target with `changeOrigin: true`.
 - Optionally strips the prefix when `rewrite` is `true`.
 - Injects the resolved session cookie for authenticated requests.
+- Adds a unique `X-REQUEST-ID` header to every proxied request.
 - Signs the outgoing request with HMAC-SHA256.
 
 Signed headers:
@@ -353,6 +354,7 @@ Signed headers:
 ```http
 x-proxy-signature: <hex-hmac>
 x-proxy-timestamp: <unix-ms>
+X-REQUEST-ID: <uuid-v4>
 ```
 
 The signature is computed over:

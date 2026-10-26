@@ -46,6 +46,7 @@ function setupRoutes(): void {
 
           proxyReq.setHeader('x-proxy-signature', signature);
           proxyReq.setHeader('x-proxy-timestamp', timestamp);
+          proxyReq.setHeader('X-REQUEST-ID', crypto.randomUUID());
 
           const authReq = req as AuthenticatedRequest;
           if (authReq.user) {

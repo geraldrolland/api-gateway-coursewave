@@ -127,6 +127,25 @@ describe('Proxy Module', () => {
       expect(Number(timestampCall![1])).toBeGreaterThan(0);
     });
 
+    it('should set a random X-REQUEST-ID header', () => {
+      const mockProxyReq = {
+        getHeader: jest.fn().mockReturnValue(''),
+        setHeader: jest.fn(),
+      };
+      const req = { method: 'GET', url: '/api/test/data' };
+
+      proxyReqHandler(mockProxyReq, req);
+
+      const requestIdCall = mockProxyReq.setHeader.mock.calls.find(
+        (call: any[]) => call[0] === 'X-REQUEST-ID'
+      );
+
+      expect(requestIdCall).toBeDefined();
+      expect(requestIdCall![1]).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+      );
+    });
+
     it('should log proxy request', () => {
       const { logger } = require('../../../src/middleware/logger');
       const mockProxyReq = {
