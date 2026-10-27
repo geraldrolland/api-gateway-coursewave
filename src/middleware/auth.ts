@@ -11,9 +11,10 @@ import { AuthenticatedRequest, JwtPayload, SessionData } from '../types';
  * 1. Check if the request path is in `AUTH_EXCLUDE_PATHS` — if so, skip auth
  * 2. Extract the Bearer token from the Authorization header
  * 3. Verify the JWT signature using `JWT_SECRET`
- * 4. Extract `sessionId` from the decoded payload
- * 5. Look up the session in Redis (`session:<sessionId>`)
- * 6. Attach the session data (`userId`, `role`, `email`) to `req.user`
+ * 4. Reject the token unless its type is `access`
+ * 5. Extract `sessionId` from the decoded payload
+ * 6. Look up the session in Redis (`session:<sessionId>`)
+ * 7. Attach the session data (`userId`, `role`, `email`) to `req.user`
  *
  * Paths like `/health`, `/api/auth/login`, and `/api/auth/register` are
  * excluded from authentication to allow unauthenticated access.
@@ -44,6 +45,11 @@ export async function authMiddleware(
 
   try {
     const decoded = jwt.verify(token, config.auth.jwtSecret) as JwtPayload;
+
+    if (decoded.type !== 'access') {
+      res.status(401).json({ error: 'Invalid token type' });
+      return;
+    }
 
     if (!decoded.sessionId) {
       res.status(401).json({ error: 'Invalid token payload' });

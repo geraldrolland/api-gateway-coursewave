@@ -35,7 +35,7 @@ A production-grade reverse proxy and edge API gateway for the CourseWave platfor
 - **Rate limiting** - Fixed-window limiting by default, with a token-bucket strategy for bursty video traffic.
 - **Reverse proxy** - Route-based forwarding to upstream microservices using `http-proxy-middleware`.
 - **Signed upstream requests** - Every proxied request carries HMAC-SHA256 headers for upstream verification.
-- **Security headers** - Helmet, configurable CORS, and `HttpOnly`/`Secure`/`SameSite=Strict` refresh cookies.
+- **Security headers** - Helmet, configurable CORS, and signed `HttpOnly`/`Secure`/`SameSite=Strict` refresh cookies.
 - **Observability** - Structured JSON request and error logs through Winston.
 - **Tested** - Unit, integration, and smoke coverage powered by Jest and Supertest.
 
@@ -114,6 +114,7 @@ Copy-Item .env.example .env
 Set at minimum:
 
 - `JWT_SECRET` - shared with the auth service and used to sign/verify tokens.
+- `COOKIE_SECRET` - used to sign the refresh cookie.
 - `PROXY_SECRET` - shared with upstream services to verify signed proxy requests.
 - `REDIS_HOST` / `REDIS_PORT` - connection details for Redis.
 - `ROUTES` - JSON array describing upstream services, if proxying is needed.
@@ -152,6 +153,7 @@ curl http://localhost:3000/health
 | `CORS_HEADERS` | Allowed request headers | `Content-Type,Authorization,X-Request-ID` |
 | `CORS_CREDENTIALS` | Allow credentialed CORS requests | `false` |
 | `JWT_SECRET` | Secret used to sign and verify JWTs | `change-me-in-production` |
+| `COOKIE_SECRET` | Secret used to sign refresh cookies | `change-me-in-production` |
 | `ACCESS_TOKEN_EXPIRY` | Access token lifetime | `7m` |
 | `REFRESH_TOKEN_EXPIRY` | Refresh token lifetime | `7d` |
 | `REFRESH_TOKEN_MAX_AGE` | Refresh cookie max age in milliseconds | `604800000` |
@@ -234,11 +236,11 @@ Returns service status and the current server timestamp. This endpoint bypasses 
 POST /auth/api/v1/token-refresh
 ```
 
-Authenticates with the `refresh` HttpOnly cookie. No request body or Bearer token is required.
+Authenticates with the signed `refresh` HttpOnly cookie. No request body or Bearer token is required.
 
 ```bash
 curl -i -X POST http://localhost:3000/auth/api/v1/token-refresh \
-  --cookie "refresh=<refresh-token>"
+  --cookie "refresh=s:<signed-refresh-token>"
 ```
 
 Successful response:
@@ -246,7 +248,7 @@ Successful response:
 ```http
 HTTP/1.1 200 OK
 Content-Type: application/json
-Set-Cookie: refresh=<new-refresh-token>; Max-Age=604800; Path=/auth/api/v1/token-refresh; HttpOnly; Secure; SameSite=Strict
+Set-Cookie: refresh=s:<new-signed-refresh-token>; Max-Age=604800; Path=/auth/api/v1/token-refresh; HttpOnly; Secure; SameSite=Strict
 
 {
   "accessToken": "<new-access-token>"
@@ -255,10 +257,12 @@ Set-Cookie: refresh=<new-refresh-token>; Max-Age=604800; Path=/auth/api/v1/token
 
 Behavior:
 
-- Verifies the refresh JWT with `JWT_SECRET`.
+- Verifies the cookie signature with `COOKIE_SECRET`.
+- Verifies the refresh JWT with `JWT_SECRET` and requires `type: "refresh"`.
 - Requires a valid `sessionId` and an existing Redis session.
 - Extends the existing session's TTL to seven days.
 - Issues new access and refresh tokens using the **same** session ID.
+- Signs both tokens before storing the new refresh token in the signed cookie.
 - Rotates the `refresh` cookie scoped to `/auth/api/v1/token-refresh`.
 
 | Status | Condition |
@@ -281,10 +285,11 @@ The gateway then:
 
 1. Checks whether the path is listed in `AUTH_EXCLUDE_PATHS`.
 2. Verifies the JWT signature and expiry.
-3. Extracts `sessionId` from the token payload.
-4. Loads `session:<sessionId>` from Redis.
-5. Attaches `{ userId, role, email }` to `req.user`.
-6. Rejects the request with `401` if any step fails.
+3. Rejects the token unless `type` is `"access"`.
+4. Extracts `sessionId` from the token payload.
+5. Loads `session:<sessionId>` from Redis.
+6. Attaches `{ userId, role, email }` to `req.user`.
+7. Rejects the request with `401` if any step fails.
 
 Sessions are written by the authentication service and read by the gateway. Token refresh extends the session TTL but keeps the same session ID, so existing sessions remain valid.
 
@@ -292,11 +297,14 @@ Sessions are written by the authentication service and read by the gateway. Toke
 
 The gateway sets the refresh cookie with:
 
+- Signed HMAC using `COOKIE_SECRET`
 - `HttpOnly`
 - `Secure`
 - `SameSite=Strict`
 - `Path=/auth/api/v1/token-refresh`
 - `Max-Age` from `REFRESH_TOKEN_MAX_AGE`
+
+The signed cookie value uses the `s:<value>.<signature>` format understood by `cookie-parser`. Requests with unsigned or modified cookies are rejected. The refresh JWT is still verified independently, providing defense in depth.
 
 Because the cookie is `Secure`, browsers only store it over HTTPS. For browser-based clients, configure `CORS_ORIGIN` with explicit origins and set `CORS_CREDENTIALS=true`.
 
@@ -475,7 +483,7 @@ The Dockerfile uses a multi-stage build, installs production dependencies only i
 
 ## Production Checklist
 
-- [ ] Replace the default `JWT_SECRET` and `PROXY_SECRET` with strong, randomly generated values.
+- [ ] Replace the default `JWT_SECRET`, `COOKIE_SECRET`, and `PROXY_SECRET` with strong, randomly generated values.
 - [ ] Terminate TLS in front of the gateway; refresh cookies are marked `Secure`.
 - [ ] Set `CORS_ORIGIN` to explicit trusted origins and enable `CORS_CREDENTIALS` only when required.
 - [ ] Restrict `AUTH_EXCLUDE_PATHS` to endpoints that genuinely do not require a Bearer token.
@@ -492,8 +500,9 @@ The Dockerfile uses a multi-stage build, installs production dependencies only i
 | Symptom | Likely cause | Resolution |
 |---------|--------------|------------|
 | `401 Missing or invalid Authorization header` | No Bearer token on a protected route | Send `Authorization: Bearer <token>` or add the path to `AUTH_EXCLUDE_PATHS` |
+| `401 Invalid token type` | A refresh token was used as a Bearer token, or the token has no `type` | Use an access token with `type: "access"` |
 | `401 Session expired or not found` | Token references a missing Redis session | Sign in again or verify Redis connectivity |
-| `401 Missing refresh token` | Cookie absent, expired, or blocked by its path/security attributes | Use HTTPS, confirm `Path=/auth/api/v1/token-refresh`, and enable credentialed CORS |
+| `401 Missing refresh token` | Cookie absent, unsigned, tampered, expired, or blocked by its path/security attributes | Use HTTPS, confirm `Path=/auth/api/v1/token-refresh`, ensure `COOKIE_SECRET` matches, and enable credentialed CORS |
 | `429 Too many requests` | Rate limit exceeded for the user or IP | Wait for `Retry-After` or raise the configured limit |
 | `502 Bad gateway` | Upstream service unreachable | Check the route `target` and upstream health |
 | Redis connection errors | Redis unavailable or misconfigured | Verify `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, and `REDIS_DB` |

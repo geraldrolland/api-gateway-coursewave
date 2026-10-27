@@ -47,6 +47,7 @@ const config: GatewayConfig = {
   },
   auth: {
     jwtSecret: process.env.JWT_SECRET || 'change-me-in-production',
+    cookieSecret: process.env.COOKIE_SECRET || 'change-me-in-production',
     excludePaths: (process.env.AUTH_EXCLUDE_PATHS || '/health,/auth/api/v1/token-refresh,/api/auth/login,/api/auth/register').split(','),
   },
   rateLimit: {
