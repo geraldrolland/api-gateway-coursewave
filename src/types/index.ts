@@ -35,7 +35,7 @@ export interface RouteConfig {
  * @property port - HTTP server port
  * @property host - Bind address
  * @property cors - CORS configuration (origins, methods, headers, credentials)
- * @property auth - JWT secret and path exclusion list
+ * @property auth - JWT secret, cookie signing secret, and path exclusion list
  * @property rateLimit - Global rate limit defaults (window + max)
  * @property routes - Array of upstream route configurations
  * @property redis - Redis connection parameters (sessions + rate limit counters)
@@ -52,6 +52,7 @@ export interface GatewayConfig {
   };
   auth: {
     jwtSecret: string;
+    cookieSecret: string;
     excludePaths: string[];
   };
   rateLimit: {
@@ -73,9 +74,11 @@ export interface GatewayConfig {
  * The `sessionId` links the token to a Redis session record.
  *
  * @property sessionId - UUID v4 identifying the active session
+ * @property type - Distinguishes access tokens from refresh tokens
  */
 export interface JwtPayload {
   sessionId: string;
+  type: 'access' | 'refresh';
 }
 
 /**

@@ -22,7 +22,7 @@ beforeAll(async () => {
 
   const testApp = expressModule();
   testApp.use(helmet());
-  testApp.use(cookieParser());
+  testApp.use(cookieParser(config.auth.cookieSecret));
   testApp.use(expressModule.json());
   testApp.use(requestLogger);
   testApp.get('/health', (_req: any, res: any) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));

@@ -42,7 +42,7 @@ describe('Auth Middleware', () => {
   });
 
   it('should return 401 if no sessionId in token', async () => {
-    const token = jwt.sign({}, 'test-secret');
+    const token = jwt.sign({ type: 'access' }, 'test-secret');
     const req = createMockReq({ path: '/api/users', headers: { authorization: `Bearer ${token}` } });
     const res = createMockRes();
     const next = createMockNext();
@@ -50,8 +50,30 @@ describe('Auth Middleware', () => {
     expect(res.status).toHaveBeenCalledWith(401);
   });
 
-  it('should return 401 if session not found in Redis', async () => {
+  it('should return 401 when the token type is refresh', async () => {
+    const token = jwt.sign({ sessionId: 'sess-123', type: 'refresh' }, 'test-secret');
+    const req = createMockReq({ path: '/api/users', headers: { authorization: `Bearer ${token}` } });
+    const res = createMockRes();
+    const next = createMockNext();
+    await authMiddleware(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(res.body).toEqual({ error: 'Invalid token type' });
+    expect(mockRedis.get).not.toHaveBeenCalled();
+  });
+
+  it('should return 401 when the token type is missing', async () => {
     const token = jwt.sign({ sessionId: 'sess-123' }, 'test-secret');
+    const req = createMockReq({ path: '/api/users', headers: { authorization: `Bearer ${token}` } });
+    const res = createMockRes();
+    const next = createMockNext();
+    await authMiddleware(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(res.body).toEqual({ error: 'Invalid token type' });
+    expect(mockRedis.get).not.toHaveBeenCalled();
+  });
+
+  it('should return 401 if session not found in Redis', async () => {
+    const token = jwt.sign({ sessionId: 'sess-123', type: 'access' }, 'test-secret');
     mockRedis.get.mockResolvedValue(null);
     const req = createMockReq({ path: '/api/users', headers: { authorization: `Bearer ${token}` } });
     const res = createMockRes();
@@ -61,7 +83,7 @@ describe('Auth Middleware', () => {
   });
 
   it('should attach user and call next on valid token', async () => {
-    const token = jwt.sign({ sessionId: 'sess-123' }, 'test-secret');
+    const token = jwt.sign({ sessionId: 'sess-123', type: 'access' }, 'test-secret');
     mockRedis.get.mockResolvedValue(JSON.stringify({ userId: 'u1', role: 'admin', email: 'a@b.com' }));
     const req = createMockReq({ path: '/api/users', headers: { authorization: `Bearer ${token}` } });
     const res = createMockRes();

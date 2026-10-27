@@ -15,7 +15,7 @@ const app = express();
 app.use(helmet());
 app.use(corsMiddleware);
 app.use(requestLogger);
-app.use(cookieParser());
+app.use(cookieParser(config.auth.cookieSecret));
 
 /**
  * GET /health — Health check endpoint.
